@@ -55,11 +55,14 @@ The widget hides itself until both `printerSn` and `printerIp` are set.
 
 ### How it connects
 
-`scripts/bambu-bridge.py` opens one MQTT connection per widget instance to
-`printerIp:1883` with the Bambu LAN credentials (user `bblp`, password = the
-access code), subscribes to the printer's report topic, requests a full status
-push, and answers the keepalive. It reconnects on its own with backoff when
-the printer goes away and comes back; the widget never needs restarting.
+`scripts/bambu-bridge.py` opens one MQTT connection per widget instance with
+the Bambu LAN credentials (user `bblp`, password = the access code),
+subscribes to the printer's report topic, requests a full status push, and
+answers the keepalive. The transport is negotiated automatically: older
+firmware serves plaintext MQTT on port 1883, current firmware only TLS on
+8883 (its device certificate is accepted as-is, like every other LAN tool).
+It reconnects on its own with backoff when the printer goes away and comes
+back; the widget never needs restarting.
 
 ## Remove
 

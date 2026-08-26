@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """MQTT bridge for Bambu Lab printers, Python stdlib only.
 
-Speaks the same LAN MQTT dialect as Bambu Studio (port 1883, user "bblp",
-password = printer access code) and emits one JSON object per line on stdout:
+Speaks the same LAN MQTT dialect as Bambu Studio (user "bblp", password =
+printer access code; older firmware on plaintext 1883, current firmware on
+TLS 8883 — negotiated automatically) and emits one JSON object per line on
+stdout:
 
   {"event": "connected"}
   {"event": "disconnected", "reason": "..."}
@@ -18,6 +20,7 @@ Exit is reserved for SIGTERM/SIGINT from the widget host.
 import argparse
 import json
 import socket
+import ssl
 import struct
 import sys
 import time
@@ -67,9 +70,12 @@ def packet(first_byte, body):
 
 
 def connect_packet(client_id, access_code):
-    variable_header = mstr("MQTT") + bytes([4, 0x02]) + struct.pack("!H", 60)
+    # Flags: username + password + clean session. A broker enforces this —
+    # credentials in the payload without the flag bits is a protocol violation
+    # and real printers drop the connection.
+    variable_header = mstr("MQTT") + bytes([4, 0xC2]) + struct.pack("!H", 60)
     payload = mstr(client_id) + mstr("bblp") + mstr(access_code)
-    return packet(0x10, variable_header + payload)  # CONNECT, clean session
+    return packet(0x10, variable_header + payload)
 
 
 def subscribe_packet(packet_id, topic):
@@ -129,12 +135,19 @@ def decode_publish(body):
 
 
 class Bridge:
-    def __init__(self, host, port, sn, access_code):
+    def __init__(self, host, sn, access_code, port=None, tls=False):
         self.host = host
-        self.port = port
         self.sn = sn
         self.access_code = access_code
         self.sock = None
+        # No explicit port: negotiate. Older firmware serves plaintext MQTT on
+        # 1883, current firmware only TLS on 8883 (device-cert signed, so the
+        # chain is not verified — same as every other LAN tool). An explicit
+        # --port pins a single transport; TLS applies on 8883 or with --tls.
+        if port:
+            self.candidates = [(port, tls or port == 8883)]
+        else:
+            self.candidates = [(1883, False), (8883, True)]
 
     def run(self):
         backoff = BACKOFF_MIN
@@ -153,7 +166,25 @@ class Bridge:
                 continue
 
     def connect_once(self):
-        sock = socket.create_connection((self.host, self.port), CONNECT_TIMEOUT)
+        last_error = None
+        for port, tls in self.candidates:
+            try:
+                self.connect_transport(port, tls)
+                return
+            except AuthError:
+                raise  # auth answered on this transport; don't try another
+            except (OSError, ConnectionError) as e:
+                last_error = e
+                continue
+        raise last_error if last_error else ConnectionError("no transport")
+
+    def connect_transport(self, port, tls):
+        sock = socket.create_connection((self.host, port), CONNECT_TIMEOUT)
+        if tls:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            sock = context.wrap_socket(sock, server_hostname=self.host)
         self.sock = sock
         try:
             sock.settimeout(SOCK_TIMEOUT)
@@ -170,7 +201,9 @@ class Bridge:
             sock.sendall(subscribe_packet(1, "device/%s/report" % self.sn))
             self.request_pushall()
             emit({"event": "connected"})
-            log("connected to %s:%d sn=%s" % (self.host, self.port, self.sn))
+            log("connected to %s:%d%s sn=%s" % (self.host, port, " (tls)" if tls else "", self.sn))
+            # Whatever answered moves to the front for the next reconnect.
+            self.candidates.sort(key=lambda c: (c[0] != port))
             self.stream_loop()
         finally:
             try:
@@ -188,10 +221,15 @@ class Bridge:
         last_pushall = time.monotonic()
         while True:
             # The 1s receive timeout turns blocking reads into a polling loop
-            # so keepalives and pushall refreshes fire on schedule.
+            # so keepalives and pushall refreshes fire on schedule. TLS sockets
+            # report that timeout as an SSLError on some platforms.
             try:
                 packet_type, body = read_packet(self.sock)
             except socket.timeout:
+                packet_type = None
+            except ssl.SSLError as e:
+                if "timed out" not in str(e):
+                    raise ConnectionError(str(e))
                 packet_type = None
             if packet_type == 3:  # PUBLISH
                 topic, raw = decode_publish(body)
@@ -226,13 +264,15 @@ class AuthError(Exception):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", required=True)
-    parser.add_argument("--port", type=int, default=1883)
+    parser.add_argument("--port", type=int, default=None,
+                        help="omit to try 1883 plaintext then 8883 TLS")
+    parser.add_argument("--tls", action="store_true")
     parser.add_argument("--sn", required=True)
     parser.add_argument("--code", required=True)
     args = parser.parse_args()
 
     try:
-        Bridge(args.host, args.port, args.sn, args.code).run()
+        Bridge(args.host, args.sn, args.code, args.port, args.tls).run()
     except KeyboardInterrupt:
         pass
 
