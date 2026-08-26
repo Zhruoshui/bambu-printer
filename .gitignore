@@ -1,0 +1,6 @@
+# Python bytecode from running the bridge
+__pycache__/
+*.pyc
+
+# Claude Code session bookkeeping
+.claude/

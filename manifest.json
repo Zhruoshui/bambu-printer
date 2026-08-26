@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.zhruoshui.bambu-printer",
+  "name": "Bambu Printer",
+  "version": "0.1.0",
+  "author": "Zhruoshui",
+  "license": "MIT",
+  "description": "Bambu Lab printer status in the bar: print progress, remaining time, temperatures and layer info over LAN MQTT, reusing the access code stored by Bambu Studio.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Bambu Printer",
+    "description": "Live print status from a Bambu Lab printer on the LAN: progress and remaining time in the bar, temperatures and layer info in the popup. One widget per printer.",
+    "category": "Devices",
+    "allowMultiple": true,
+    "defaultSection": "right",
+    "defaults": {
+      "printerSn": "",
+      "printerIp": "",
+      "printerName": "",
+      "accessCode": "",
+      "showWhenIdle": false
+    },
+    "schema": [
+      {
+        "key": "printerSn",
+        "type": "string",
+        "label": "Printer serial number",
+        "defaultValue": "",
+        "description": "15-character SN, e.g. 00M09C3A0801234. Shown in Bambu Studio under printer settings."
+      },
+      {
+        "key": "printerIp",
+        "type": "string",
+        "label": "Printer IP address",
+        "defaultValue": "",
+        "description": "LAN IP of the printer, e.g. 192.168.1.42. Find it in Bambu Studio's device page or your router."
+      },
+      {
+        "key": "printerName",
+        "type": "string",
+        "label": "Display name",
+        "defaultValue": "",
+        "description": "Optional friendly name shown in the panel. Falls back to the last 4 digits of the SN."
+      },
+      {
+        "key": "accessCode",
+        "type": "string",
+        "label": "Access code",
+        "defaultValue": "",
+        "description": "Leave empty to read it from Bambu Studio's config automatically."
+      },
+      {
+        "key": "showWhenIdle",
+        "type": "boolean",
+        "label": "Show while idle",
+        "defaultValue": false,
+        "description": "Keep the bar widget visible even when the printer is idle or offline."
+      }
+    ]
+  }
+}
